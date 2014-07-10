@@ -1,0 +1,51 @@
+/*
+ Copyright (C) 2013 Typesafe, Inc <http://typesafe.com>
+ */
+@import '../../commons/_base.less';
+
+.inspect {
+  nav .list {
+    a {
+      .cover ();
+      color: #fff;
+      font-size: 16px;
+    }
+  }
+  .icon {
+    font: 16px icons;
+  }
+  section section {
+    overflow: auto;
+    position: absolute;
+    top: 50px;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    &.withFooter {
+      padding-bottom: 31px;
+    }
+  }
+}
+
+.hoverPopup {
+  position: absolute;
+  background: @yellow;
+  color: @yellow-text;
+}
+
+#splash {
+  margin: 40px;
+  height: auto;
+  font-weight: 600;
+  text-align: center;
+  color: @grey;
+  p {
+    margin: 10px auto;
+    max-width: 500px;
+  }
+  a {
+    display: block;
+    text-decoration: underline;
+    padding-top: 20px;
+  }
+}

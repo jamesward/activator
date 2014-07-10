@@ -70,6 +70,14 @@ object Dependencies {
   // Analyzers used by Inspect
   val activatorAnalytics = "com.typesafe.activator"  %% "analytics" % activatorAnalyticsVersion
 
+
+  // Heroku
+  val herokuApi   = "com.heroku.api" % "heroku-api" % "0.15"
+  val herokuJson  = "com.heroku.api" % "heroku-json-jackson" % "0.15"
+  val herokuHttp  = "com.heroku.api" % "heroku-http-ning-async" % "0.15"
+  val jgit        = "org.eclipse.jgit" % "org.eclipse.jgit" % "3.4.1.201406201815-r"
+
+
   // Mini DSL
   // DSL for adding remote deps like local deps.
   implicit def p2remote(p: Project): RemoteDepHelper = new RemoteDepHelper(p)

@@ -30,6 +30,13 @@ PUT         /api/local/create                            controllers.api.Local.c
 PUT         /api/local/rename                            controllers.api.Local.renameFile
 PUT         /api/local/delete                            controllers.api.Local.deleteFile
 
+# Heroku
+POST        /api/heroku/login                            controllers.api.Heroku.login
+GET         /api/heroku/apps                             controllers.api.Heroku.getApps(location)
+PUT         /api/heroku/apps                             controllers.api.Heroku.createApp(location)
+PUT         /api/heroku/deploy/:app                      controllers.api.Heroku.deploy(location, app)
+GET         /api/heroku/logs/:app                        controllers.api.Heroku.logs(app)
+
 # Base flow ->  Select Template -> Running Application.
 GET         /                                            controllers.Application.index
 GET         /home                                        controllers.Application.forceHome

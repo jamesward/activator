@@ -42,6 +42,10 @@
             data-bind="visible: build.activity.inspecting"></span><span class="counter"
             data-bind="text: build.errors.inspect().length, visible: build.errors.inspect().length > 0"></span></a>
         </dd>
+        <dt>Deploy</dt>
+        <dd>
+          <a data-bind="attr: { href: '#heroku' }, isActiveUrl: '#heroku'">Heroku</a>
+        </dd>
       </dl>
       <div id="typesafe">
         <a href="http://typesafe.com" target="_blank" class="website">
