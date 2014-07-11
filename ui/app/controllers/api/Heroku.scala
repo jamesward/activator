@@ -3,7 +3,7 @@
  */
 package controllers.api
 
-import java.io.{ ByteArrayOutputStream, File }
+import java.io.{ OutputStreamWriter, OutputStream, ByteArrayOutputStream, File }
 import java.net.URL
 
 import com.heroku.api.HerokuAPI
@@ -12,10 +12,10 @@ import com.heroku.api.request.login.BasicAuthLogin
 import com.jcraft.jsch.{ KeyPair, JSch }
 import org.apache.http.HttpClientConnection
 import org.eclipse.jgit.api.Git
-import org.eclipse.jgit.lib.RepositoryBuilder
+import org.eclipse.jgit.lib.{ TextProgressMonitor, ProgressMonitor, RepositoryBuilder }
 import org.eclipse.jgit.transport.{ SshSessionFactory, URIish }
 import play.api.Play
-import play.api.libs.iteratee.Enumerator
+import play.api.libs.iteratee.{ Concurrent, Enumerator }
 import play.api.libs.json.Json
 import play.api.mvc.Security.{ AuthenticatedRequest, AuthenticatedBuilder }
 import play.api.mvc._
@@ -124,13 +124,18 @@ trait Heroku {
 
     val gitRepo = new Git(repository)
 
-    gitRepo.add().addFilepattern("*").call()
+    gitRepo.add().addFilepattern(".").call()
 
     gitRepo.commit().setMessage("Automatic commit for Heroku deployment").call()
 
-    gitRepo.push().setRemote("heroku").call()
+    val e = Enumerator.outputStream { out =>
+      val pm = new TextProgressMonitor(new OutputStreamWriter(out))
+      val result = gitRepo.push().setRemote("heroku").setOutputStream(out).setProgressMonitor(pm).call
+      result.asScala.foreach(r => out.write(r.getMessages.getBytes))
+      out.close()
+    }
 
-    Ok
+    Ok.chunked(e)
   }
 
   def logs(app: String) = Authenticated { request =>

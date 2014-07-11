@@ -109,6 +109,7 @@ object TheActivatorBuild extends Build {
   lazy val ui = (
     ActivatorPlayProject("ui")
     dependsOnRemote(
+      "com.typesafe.play" % "play-ws_2.11" % Dependencies.playVersion,
       requirejs, jquery, knockout, ace, /*requireCss, requireText,*/ keymage, commonsIo, mimeUtil, activatorAnalytics,
       herokuApi, herokuJson, herokuHttp, jgit,
       sbtLauncherInterface % "provided",

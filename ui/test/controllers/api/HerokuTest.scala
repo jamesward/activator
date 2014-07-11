@@ -1,7 +1,9 @@
 package controllers.api
 
 import java.io.File
+import java.util.concurrent.TimeUnit
 
+import akka.util.Timeout
 import com.heroku.api.HerokuAPI
 import org.eclipse.jgit.lib.RepositoryBuilder
 import org.eclipse.jgit.transport.URIish
@@ -10,6 +12,7 @@ import org.specs2.Specification
 import org.specs2.runner.JUnitRunner
 import org.specs2.specification.{ Fragments, Step }
 import play.api.libs.json.{ JsObject, Json }
+import play.api.libs.ws.WS
 import play.api.mvc.{ Controller, Results }
 import play.api.test.{ FakeRequest, PlaySpecification, WithApplication }
 import sbt.IO
@@ -168,9 +171,16 @@ class HerokuTest extends PlaySpecification with Results {
 
         val result = new TestController().deploy(appDir.getAbsolutePath, "whatevs")(FakeRequest().withSession("herokuAuthKey" -> authKey))
 
+        contentAsString(result)(Timeout(1, TimeUnit.MINUTES)) must contain("deployed to Heroku")
+
         status(result) must be equalTo OK
 
-        // test the actual app on Heroku
+        val apps = getApps(authKey)
+
+        val deployedResult = await(WS.url(apps.head.getWebUrl).get())
+
+        deployedResult.status must be equalTo OK
+        deployedResult.body must be equalTo "hello, world"
       }
     }
   }
