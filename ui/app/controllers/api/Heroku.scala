@@ -53,7 +53,7 @@ trait Heroku {
   }
 
   def getDefaultApp(location: String) = Authenticated(location) { request =>
-    request.headers.get(SESSION_APP(location)).fold(NotFound(Results.EmptyContent()))(app => Ok(Json.obj("app" -> app)))
+    request.session.get(SESSION_APP(location)).fold(NotFound(Results.EmptyContent()))(app => Ok(Json.obj("app" -> app)))
   }
 
   def setDefaultApp(location: String, app: String) = Authenticated(location) { implicit request =>
@@ -79,6 +79,7 @@ trait Heroku {
     }
   }
 
+  // todo: when build is complete, close the stream
   def deploy(location: String, app: String) = Authenticated(location).async { request =>
 
     val createSlugFuture = HerokuAPI.createSlug(request.apiKey, app, new File(location))
@@ -91,6 +92,9 @@ trait Heroku {
         case e: Exception =>
           InternalServerError(jsonError(e))
       }
+    } recover {
+      case e: Exception =>
+        InternalServerError(jsonError(e))
     }
   }
 
@@ -219,18 +223,21 @@ object HerokuAPI {
 
   // side effecting!!!
   def addToTar(tOut: TarArchiveOutputStream, path: String, base: String): Unit = {
-    val f = new File(path)
-    val entryName = base + f.getName
-    val tarEntry = new TarArchiveEntry(f, entryName)
-    tOut.putArchiveEntry(tarEntry)
+    // manual exclude of target dirs
+    if (!base.endsWith("target/") && !path.endsWith("target")) {
+      val f = new File(path)
+      val entryName = base + f.getName
+      val tarEntry = new TarArchiveEntry(f, entryName)
+      tOut.putArchiveEntry(tarEntry)
 
-    if (f.isFile) {
-      IOUtils.copy(new FileInputStream(f), tOut)
-      tOut.closeArchiveEntry()
-    } else {
-      tOut.closeArchiveEntry()
-      f.listFiles.foreach { child =>
-        addToTar(tOut, child.getAbsolutePath, entryName + "/")
+      if (f.isFile) {
+        IOUtils.copy(new FileInputStream(f), tOut)
+        tOut.closeArchiveEntry()
+      } else {
+        tOut.closeArchiveEntry()
+        f.listFiles.foreach { child =>
+          addToTar(tOut, child.getAbsolutePath, entryName + "/")
+        }
       }
     }
   }

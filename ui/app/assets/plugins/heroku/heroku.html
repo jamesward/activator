@@ -3,21 +3,45 @@
         <header>
             <h1>Deploy on Heroku</h1>
         </header>
-        <div class="options">
-            <div class="buttons">
-                <span class="button"></span>
+
+        <div class="subhead">
+            Instantly deploy this app on the cloud.
+        </div>
+
+        <div class="main" data-bind="visible: loggedIn">
+            <span data-bind="visible: apps().length == 0">No Heroku app detected</span>
+            <select data-bind="options: apps,
+                       optionsText: 'name',
+                       value: selectedApp,
+                       optionsCaption: 'Your Heroku Apps...',
+                       visible: apps().length > 0">
+            </select>
+            <button data-bind="click: createNewApp" class="plusbutton">+</button>
+            <div data-bind="visible: selectedApp() != undefined, with: selectedApp">
+                <a data-bind="attr: { href: web_url }" target="_blank" class="button">Open</a>
+                <a data-bind="attr: { href: 'https://dashboard.heroku.com/apps/' + name }" target="_blank" class="button">Manage</a>
+                <a href="#" data-bind="click: $parent.deploy" class="button">Deploy</a>
+                <a href="#" data-bind="click: $parent.getLogs" class="button">Logs</a>
             </div>
         </div>
-        <ul class="list">
-
-        </ul>
     </nav>
     <section>
         <header>
-            <h1>Setup Heroku</h1>
+            <h1 data-bind="visible: loggedIn() == false && initialized">Login to Heroku (<a href="https://id.heroku.com/signup" target="_blank" style="text-decoration: underline">Sign Up for Free</a>)</h1>
+            <h1 data-bind="visible: loggedIn && initialized">Logged Into Heroku</h1>
         </header>
-        <div class="wrapper">
-
-        </div>
+        <article class="page typo wrapper" data-bind="visible: !loggedIn() && initialized">
+            <span class="error" data-bind="text: errorMessage"></span>
+            <form data-bind="submit: login">
+                <label for="herokuEmail">Email:</label>
+                <input id="herokuEmail" name="herokuEmail" data-bind="value: herokuEmail">
+                <label for="herokuPassword">Password:</label>
+                <input id="herokupassword" name="herokuPassword" type="password" data-bind="value: herokuPassword">
+                <button type="submit">Login</button>
+            </form>
+        </article>
+        <article class="page typo wrapper" data-bind="visible: loggedIn && initialized">
+            <pre style="border: none"><code data-bind="text: logs"></code></pre>
+        </article>
     </section>
 </article>

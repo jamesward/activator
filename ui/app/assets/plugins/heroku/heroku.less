@@ -3,49 +3,60 @@
  */
 @import '../../commons/_base.less';
 
-.inspect {
-  nav .list {
-    a {
-      .cover ();
-      color: #fff;
-      font-size: 16px;
+.subhead {
+  border-radius: 2px;
+  margin: 0;
+  padding: 10px;
+  background: #6e818d;
+}
+
+.main {
+  padding: 10px;
+}
+
+.list {
+  li {
+    small {
+      display: block;
+      margin-bottom: 10px;
     }
-  }
-  .icon {
-    font: 16px icons;
-  }
-  section section {
-    overflow: auto;
-    position: absolute;
-    top: 50px;
-    left: 0;
-    bottom: 0;
-    right: 0;
-    &.withFooter {
-      padding-bottom: 31px;
+    em {
+      display: block;
     }
   }
 }
 
-.hoverPopup {
-  position: absolute;
-  background: @yellow;
-  color: @yellow-text;
+.heroku article {
+  padding: 10px 20px;
+  width: 100%;
 }
 
-#splash {
-  margin: 40px;
-  height: auto;
-  font-weight: 600;
-  text-align: center;
-  color: @grey;
-  p {
-    margin: 10px auto;
-    max-width: 500px;
-  }
-  a {
+.heroku {
+  label {
+    margin-top: 10px;
     display: block;
-    text-decoration: underline;
-    padding-top: 20px;
+  }
+  input {
+    display: block;
+    padding: 4px;
+    width: 200px;
+    border: 1px solid @grey-dkr;
+  }
+  .button {
+    color: #fff;
+    border: 1px solid @grey-dkr;
+    margin-top: 10px;
+    padding: 5px;
+    display: block;
+  }
+  .plusbutton {
+    padding: 1px 5px 2px 5px;
+    background-color: #fff;
+    border: 1px solid #6e818d;
+    border-radius: 4px;
+    display: inline;
+  }
+  form {
+    margin-top: 10px;
   }
 }
