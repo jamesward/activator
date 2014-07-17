@@ -50,7 +50,6 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
     $.ajax("/api/heroku/apps?location=" + window.serverAppModel.location, {
       type: "POST",
       success: function(data) {
-        console.log(data);
         HerokuState.apps.push(data);
         HerokuState.selectedApp(data);
       },
