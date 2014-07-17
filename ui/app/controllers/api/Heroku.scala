@@ -44,12 +44,16 @@ trait Heroku {
       apiKeyFuture.map { apiKey =>
         // todo: persist auth apiKey into ~/.netrc so that it can also be used with the Heroku CLI??
         // put the key in a location specific and a general cookie so that apps can be associated with different authenticated users
-        Ok.withSession(SESSION_APIKEY(location) -> apiKey, SESSION_APIKEY() -> apiKey)
+        Ok.addingToSession(SESSION_APIKEY(location) -> apiKey, SESSION_APIKEY() -> apiKey)
       } recover {
         case e: Exception =>
           Unauthorized(jsonError(e))
       }
     }
+  }
+
+  def logout(location: String) = Action { implicit request =>
+    Ok.removingFromSession(SESSION_APIKEY(location), SESSION_APIKEY())
   }
 
   def getDefaultApp(location: String) = Authenticated(location) { request =>
@@ -113,6 +117,8 @@ trait Heroku {
   def Authenticated(location: String) = new ActionBuilder[HerokuRequest] {
     def invokeBlock[A](request: Request[A], block: (HerokuRequest[A]) => Future[Result]) = {
 
+      // first try to get the apikey for this location
+      // fallback to the general apikey
       def userinfo(request: RequestHeader): Option[String] =
         request.session.get(SESSION_APIKEY(location)).orElse(request.session.get(SESSION_APIKEY()))
 

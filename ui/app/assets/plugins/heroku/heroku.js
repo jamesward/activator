@@ -79,6 +79,21 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
     });
   };
 
+  HerokuState.logout = function(form) {
+    $.ajax("/api/heroku/logout?location=" + window.serverAppModel.location, {
+      type: "POST",
+      success: function (data) {
+        HerokuState.apps([]);
+        HerokuState.selectedApp(undefined);
+        HerokuState.loggedIn(false);
+        HerokuState.logs("");
+      },
+      error: function (error) {
+        console.log(error);
+      }
+    });
+  };
+
   HerokuState.getApps = function() {
     $.getJSON("/api/heroku/apps?location=" + window.serverAppModel.location).
       success(function(data) {

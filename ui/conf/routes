@@ -32,6 +32,7 @@ PUT         /api/local/delete                            controllers.api.Local.d
 
 # Heroku
 POST        /api/heroku/login                            controllers.api.Heroku.login(location)
+POST        /api/heroku/logout                           controllers.api.Heroku.logout(location)
 GET         /api/heroku/apps                             controllers.api.Heroku.getApps(location)
 POST        /api/heroku/apps                             controllers.api.Heroku.createApp(location)
 GET         /api/heroku/apps/default                     controllers.api.Heroku.getDefaultApp(location)
