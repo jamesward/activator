@@ -3,162 +3,121 @@
  */
 package controllers.api
 
-import java.io.{ OutputStreamWriter, OutputStream, ByteArrayOutputStream, File }
-import java.net.URL
+import java.io.{ BufferedOutputStream, File, FileInputStream, FileOutputStream }
+import java.util.zip.GZIPOutputStream
 
-import com.heroku.api.HerokuAPI
-import com.heroku.api.request.key.KeyAdd
-import com.heroku.api.request.login.BasicAuthLogin
-import com.jcraft.jsch.{ KeyPair, JSch }
-import org.apache.http.HttpClientConnection
-import org.eclipse.jgit.api.Git
-import org.eclipse.jgit.lib.{ TextProgressMonitor, ProgressMonitor, RepositoryBuilder }
-import org.eclipse.jgit.transport.{ SshSessionFactory, URIish }
-import play.api.Play
-import play.api.libs.iteratee.{ Concurrent, Enumerator }
-import play.api.libs.json.Json
-import play.api.mvc.Security.{ AuthenticatedRequest, AuthenticatedBuilder }
+import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
+import org.apache.commons.compress.utils.IOUtils
+import play.api.Play.current
+import play.api.http.Status
+import play.api.libs.iteratee.Enumerator
+import play.api.libs.json.{ JsObject, JsValue, Json }
+import play.api.libs.ws._
+import play.api.mvc.Security.{ AuthenticatedBuilder, AuthenticatedRequest }
 import play.api.mvc._
-import sbt.IO
-import snap.AppManager
 
-import scala.collection.JavaConverters._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
-import scala.util.{ Failure, Success, Try }
 
 // todo: csrf
 
 trait Heroku {
   this: Controller =>
 
-  private def createSshKey(authKey: String) = {
+  def SESSION_APIKEY(): String = "HEROKU_API_KEY"
+  def SESSION_APIKEY(location: String): String = location + "-APIKEY"
+  def SESSION_APP(location: String): String = location + "-APP"
 
-    val herokuApi = new HerokuAPI(authKey)
+  private def jsonError(message: String): JsObject = Json.obj("error" -> message)
+  private def jsonError(error: Exception): JsObject = jsonError(error.getMessage)
 
-    val SSH_KEY_COMMENT = "Typesafe-Activator-Key-" + authKey
+  def login(location: String) = Action.async(parse.json) { implicit request =>
 
-    val sshDir = new File(sys.props("user.home"), ".ssh")
-    sshDir.mkdirs()
-
-    val privateKeyFile = new File(sshDir, "id_rsa-heroku-activator")
-
-    if (!privateKeyFile.exists()) {
-      val jsch = new JSch()
-      val keyPair = KeyPair.genKeyPair(jsch, KeyPair.RSA)
-      keyPair.writePrivateKey(privateKeyFile.getAbsolutePath)
-
-      keyPair.writePublicKey(new File(sshDir, "id_rsa-heroku-activator.pub").getAbsolutePath, SSH_KEY_COMMENT)
-
-      val publicKeyOutputStream = new ByteArrayOutputStream()
-      keyPair.writePublicKey(publicKeyOutputStream, SSH_KEY_COMMENT)
-      publicKeyOutputStream.close()
-
-      val sshPublicKey = new String(publicKeyOutputStream.toByteArray)
-
-      herokuApi.addKey(sshPublicKey)
-    }
-  }
-
-  def login = Action(parse.json) { request =>
-
-    val maybeKey = for {
+    val maybeApiKeyFuture = for {
       username <- (request.body \ "username").asOpt[String]
       password <- (request.body \ "password").asOpt[String]
-    } yield Try(HerokuAPI.obtainApiKey(username, password))
-    // todo: persist auth token into ~/.netrc so that it can also be used with the Heroku CLI??
-
-    maybeKey.fold(BadRequest("username and/or password not specified")) {
-      case Success(key) =>
-        createSshKey(key)
-        Ok.withSession("herokuAuthKey" -> key)
-      case Failure(error) =>
-        Unauthorized(error.getMessage)
-    }
-  }
-
-  def getApps(location: String) = Authenticated { request =>
-
-    // check for a git repo with heroku remote(s)
-    val repository = new RepositoryBuilder().setGitDir(new File(location, ".git")).build()
-
-    if (!repository.getObjectDatabase.exists()) {
-      repository.create()
+    } yield {
+      HerokuAPI.getApiKey(username, password)
     }
 
-    val remotes = repository.getConfig.getSubsections("remote").asScala.map { remoteName =>
-      new URIish(repository.getConfig.getString("remote", remoteName, "url"))
-    }
-
-    val maybeHerokuAppNames = remotes.filter(_.getHost == "heroku.com").map(_.getPath.stripSuffix(".git"))
-
-    // verify the user has access to the app(s)
-    val existingApps = maybeHerokuAppNames.map(request.api.getApp)
-
-    Ok(play.libs.Json.toJson(existingApps.asJava).toString)
-  }
-
-  def createApp(location: String) = Authenticated { request =>
-    val app = request.api.createApp
-
-    val repository = new RepositoryBuilder().setGitDir(new File(location, ".git")).build()
-
-    if (!repository.getObjectDatabase.exists()) {
-      repository.create()
-    }
-
-    val config = repository.getConfig
-    config.setString("remote", "heroku", "url", app.getGitUrl)
-    config.save()
-
-    Created(play.libs.Json.toJson(app).toString)
-  }
-
-  def deploy(location: String, app: String) = Authenticated { request =>
-
-    val repository = new RepositoryBuilder().setGitDir(new File(location, ".git")).build()
-
-    if (!repository.getObjectDatabase.exists()) {
-      repository.create()
-    }
-
-    val gitRepo = new Git(repository)
-
-    gitRepo.add().addFilepattern(".").call()
-
-    gitRepo.commit().setMessage("Automatic commit for Heroku deployment").call()
-
-    val e = Enumerator.outputStream { out =>
-      val pm = new TextProgressMonitor(new OutputStreamWriter(out))
-      val result = gitRepo.push().setRemote("heroku").setOutputStream(out).setProgressMonitor(pm).call
-      result.asScala.foreach(r => out.write(r.getMessages.getBytes))
-      out.close()
-    }
-
-    Ok.chunked(e)
-  }
-
-  def logs(app: String) = Authenticated { request =>
-    val logStream = request.api.getLogs(app)
-
-    val dataContent = Enumerator.fromStream(logStream.openStream())
-
-    Ok.chunked(dataContent)
-  }
-
-  class HerokuRequest[A](val api: HerokuAPI, request: Request[A]) extends WrappedRequest[A](request)
-
-  object Authenticated extends ActionBuilder[HerokuRequest] {
-    def invokeBlock[A](request: Request[A], block: (HerokuRequest[A]) => Future[Result]) = {
-      SshSessionFactory.setInstance(new HerokuSshSessionFactory)
-
-      val authBuilder = AuthenticatedBuilder { request =>
-        request.session.get("herokuAuthKey").map(new HerokuAPI(_))
+    maybeApiKeyFuture.fold(Future.successful(BadRequest(jsonError("username and/or password not specified")))) { apiKeyFuture =>
+      apiKeyFuture.map { apiKey =>
+        // todo: persist auth apiKey into ~/.netrc so that it can also be used with the Heroku CLI??
+        // put the key in a location specific and a general cookie so that apps can be associated with different authenticated users
+        Ok.withSession(SESSION_APIKEY(location) -> apiKey, SESSION_APIKEY() -> apiKey)
+      } recover {
+        case e: Exception =>
+          Unauthorized(jsonError(e))
       }
+    }
+  }
 
-      authBuilder.authenticate(request, { authRequest: AuthenticatedRequest[A, HerokuAPI] =>
+  def getDefaultApp(location: String) = Authenticated(location) { request =>
+    request.headers.get(SESSION_APP(location)).fold(NotFound(Results.EmptyContent()))(app => Ok(Json.obj("app" -> app)))
+  }
+
+  def setDefaultApp(location: String, app: String) = Authenticated(location) { implicit request =>
+    Ok.addingToSession(SESSION_APP(location) -> app)
+  }
+
+  def getApps(location: String) = Authenticated(location).async { request =>
+    HerokuAPI.getApps(request.apiKey).map { apps =>
+      implicit val appFormat = HerokuAPI.appFormat
+      Ok(Json.toJson(apps))
+    } recover {
+      case e: Exception =>
+        InternalServerError(jsonError(e))
+    }
+  }
+
+  def createApp(location: String) = Authenticated(location).async { implicit request =>
+    HerokuAPI.createApp(request.apiKey).map { app =>
+      Created(Json.toJson(app)(HerokuAPI.appFormat)).addingToSession(SESSION_APP(location) -> app.name)
+    } recover {
+      case e: Exception =>
+        InternalServerError(jsonError(e))
+    }
+  }
+
+  def deploy(location: String, app: String) = Authenticated(location).async { request =>
+
+    val createSlugFuture = HerokuAPI.createSlug(request.apiKey, app, new File(location))
+
+    createSlugFuture.flatMap { url =>
+      HerokuAPI.buildSlug(request.apiKey, app, url).map {
+        case (headers, enumerator) =>
+          Ok.chunked(enumerator)
+      } recover {
+        case e: Exception =>
+          InternalServerError(jsonError(e))
+      }
+    }
+  }
+
+  def logs(location: String, app: String) = Authenticated(location).async { request =>
+    HerokuAPI.logs(request.apiKey, app).map {
+      case (headers, enumerator) =>
+        Ok.chunked(enumerator)
+    } recover {
+      case e: Exception =>
+        InternalServerError(jsonError(e))
+    }
+  }
+
+  class HerokuRequest[A](val apiKey: String, request: Request[A]) extends WrappedRequest[A](request)
+
+  def Authenticated(location: String) = new ActionBuilder[HerokuRequest] {
+    def invokeBlock[A](request: Request[A], block: (HerokuRequest[A]) => Future[Result]) = {
+
+      def userinfo(request: RequestHeader): Option[String] =
+        request.session.get(SESSION_APIKEY(location)).orElse(request.session.get(SESSION_APIKEY()))
+
+      def unauthorized(request: RequestHeader): Result = Unauthorized(jsonError("Not authenticated"))
+
+      def authenticatedRequest(authRequest: AuthenticatedRequest[A, String]): Future[Result] =
         block(new HerokuRequest[A](authRequest.user, request))
-      })
+
+      AuthenticatedBuilder(userinfo, unauthorized).authenticate(request, authenticatedRequest)
     }
   }
 
@@ -166,58 +125,128 @@ trait Heroku {
 
 object Heroku extends Controller with Heroku
 
-// sets up the ssh config for connecting to heroku
-// mostly based on JschConfigSessionFactory
-import com.jcraft.jsch.JSch
-import com.jcraft.jsch.JSchException
-import org.eclipse.jgit.internal.JGitText
-import org.eclipse.jgit.errors.TransportException
-import org.eclipse.jgit.transport._
-import org.eclipse.jgit.util.FS
+object HerokuAPI {
 
-import java.io.IOException
-import java.net.ConnectException
-import java.net.UnknownHostException
+  var BASE_URL = "https://api.heroku.com/%s"
 
-class HerokuSshSessionFactory extends SshSessionFactory {
+  // this uses an older API version by default because the login API we are using is only in the old API
+  def ws(path: String): WSRequestHolder = WS.url(BASE_URL.format(path))
 
-  override def getSession(uri: URIish, credentialsProvider: CredentialsProvider, fs: FS, tms: Int): RemoteSession = {
-    val user = uri.getUser
-    val host = uri.getHost
+  // this one uses version 3
+  def ws(path: String, apiKey: String, version: String = "3"): WSRequestHolder =
+    ws(path).withAuth("", apiKey, WSAuthScheme.BASIC).withHeaders("Accept" -> s"application/vnd.heroku+json; version=$version")
 
-    try {
-      val jsch = new JSch()
+  def getError(response: WSResponse): String =
+    (response.json \ "error").asOpt[String].orElse((response.json \ "message").asOpt[String]).getOrElse("Unknown Error")
 
-      jsch.setKnownHosts(getClass.getClassLoader.getResourceAsStream("known_hosts"))
+  def handleAsync[A](status: Int, block: JsValue => Future[A])(response: WSResponse): Future[A] = {
+    response.status match {
+      case s: Int if s == status =>
+        block(response.json)
+      case _ =>
+        // usually an error of some sort
+        Future.failed(new RuntimeException(getError(response)))
+    }
+  }
 
-      val sshDir = new File(sys.props("user.home"), ".ssh")
+  def handle[A](status: Int, block: JsValue => A)(response: WSResponse): Future[A] = {
+    response.status match {
+      case s: Int if s == status =>
+        Future.successful(block(response.json))
+      case _ =>
+        // usually an error of some sort
+        Future.failed(new RuntimeException(getError(response)))
+    }
+  }
 
-      jsch.addIdentity(new File(sshDir, "id_rsa-heroku-activator").getAbsolutePath)
+  def getApiKey(username: String, password: String): Future[String] = {
+    ws("account").withAuth(username, password, WSAuthScheme.BASIC).get().flatMap(handle(Status.OK, _.\("api_key").as[String]))
+  }
 
-      val session = jsch.getSession(user, host)
+  def createApp(apiKey: String): Future[App] = {
+    ws("apps", apiKey).post(Results.EmptyContent()).flatMap(handle(Status.CREATED, _.as[App]))
+  }
 
-      if (!session.isConnected) {
-        session.connect(tms)
+  def destroyApp(apiKey: String, appName: String): Future[_] = {
+    ws(s"apps/$appName", apiKey).delete()
+  }
+
+  def getApps(apiKey: String): Future[Seq[App]] = {
+    ws("apps", apiKey).get().flatMap(handle(Status.OK, _.as[Seq[App]]))
+  }
+
+  def logs(apiKey: String, appName: String): Future[(WSResponseHeaders, Enumerator[Array[Byte]])] = {
+
+    val requestJson = Json.obj("tail" -> true)
+
+    ws(s"apps/$appName/log-sessions", apiKey).post(requestJson).flatMap(handleAsync(Status.CREATED, { response =>
+      val url = (response \ "logplex_url").as[String]
+      WS.url(url).stream()
+    }))
+  }
+
+  def createSlug(apiKey: String, appName: String, appDir: File): Future[String] = {
+    val requestJson = Json.obj("process_types" -> Json.obj())
+    ws(s"/apps/$appName/slugs", apiKey).post(requestJson).flatMap(handleAsync(Status.CREATED, { response =>
+
+      val id = (response \ "id").as[String]
+
+      val url = (response \ "blob" \ "url").as[String]
+
+      val tgzFile = new File(sys.props("java.io.tmpdir"), System.nanoTime().toString + ".tar.gz")
+
+      // create the tgz
+      val tgzos = new TarArchiveOutputStream(new GZIPOutputStream(new BufferedOutputStream(new FileOutputStream(tgzFile))))
+
+      // start with the files, not the dir
+      appDir.listFiles.foreach { file =>
+        addToTar(tgzos, file.getAbsolutePath, "")
       }
 
-      new JschSession(session, uri)
-    } catch {
-      case je: JSchException =>
-        je.getCause match {
-          case e: UnknownHostException =>
-            throw new TransportException(uri, JGitText.get().unknownHost)
-          case e: ConnectException =>
-            throw new TransportException(uri, e.getMessage)
-          case _ =>
-          // whatevs
-        }
-        throw new TransportException(uri, je.getMessage, je)
-      case io: IOException =>
-        throw new TransportException(uri, io.getMessage, io)
-      case e: Exception =>
-        throw new TransportException(uri, e.getMessage, e)
-    }
+      tgzos.finish()
 
+      tgzos.close()
+
+      // put the tgz
+      WS.url(url).put(tgzFile).flatMap { _ =>
+        tgzFile.delete()
+
+        // get the url to the slug
+        ws(s"apps/$appName/slugs/$id", apiKey).get().flatMap(handle(Status.OK, _.\("blob").\("url").as[String]))
+      }
+    }))
   }
+
+  // side effecting!!!
+  def addToTar(tOut: TarArchiveOutputStream, path: String, base: String): Unit = {
+    val f = new File(path)
+    val entryName = base + f.getName
+    val tarEntry = new TarArchiveEntry(f, entryName)
+    tOut.putArchiveEntry(tarEntry)
+
+    if (f.isFile) {
+      IOUtils.copy(new FileInputStream(f), tOut)
+      tOut.closeArchiveEntry()
+    } else {
+      tOut.closeArchiveEntry()
+      f.listFiles.foreach { child =>
+        addToTar(tOut, child.getAbsolutePath, entryName + "/")
+      }
+    }
+  }
+
+  def buildSlug(apiKey: String, appName: String, url: String): Future[(WSResponseHeaders, Enumerator[Array[Byte]])] = {
+    val requestJson = Json.obj("source_blob" -> Json.obj("url" -> url))
+
+    // set the api version to 'edge' in order to get the output_stream_url
+    ws(s"apps/$appName/builds", apiKey, "edge").post(requestJson).flatMap(handleAsync(Status.CREATED, { json =>
+      val url = (json \ "output_stream_url").as[String]
+      WS.url(url).stream()
+    }))
+  }
+
+  case class App(name: String, web_url: String)
+
+  implicit val appFormat = Json.format[App]
 
 }

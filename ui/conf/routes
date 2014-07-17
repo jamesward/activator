@@ -31,11 +31,13 @@ PUT         /api/local/rename                            controllers.api.Local.r
 PUT         /api/local/delete                            controllers.api.Local.deleteFile
 
 # Heroku
-POST        /api/heroku/login                            controllers.api.Heroku.login
+POST        /api/heroku/login                            controllers.api.Heroku.login(location)
 GET         /api/heroku/apps                             controllers.api.Heroku.getApps(location)
-PUT         /api/heroku/apps                             controllers.api.Heroku.createApp(location)
+POST        /api/heroku/apps                             controllers.api.Heroku.createApp(location)
+GET         /api/heroku/apps/default                     controllers.api.Heroku.getDefaultApp(location)
+PUT         /api/heroku/apps/default/:app                controllers.api.Heroku.setDefaultApp(location, app)
 PUT         /api/heroku/deploy/:app                      controllers.api.Heroku.deploy(location, app)
-GET         /api/heroku/logs/:app                        controllers.api.Heroku.logs(app)
+GET         /api/heroku/logs/:app                        controllers.api.Heroku.logs(location, app)
 
 # Base flow ->  Select Template -> Running Application.
 GET         /                                            controllers.Application.index

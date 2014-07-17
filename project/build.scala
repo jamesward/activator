@@ -110,8 +110,8 @@ object TheActivatorBuild extends Build {
     ActivatorPlayProject("ui")
     dependsOnRemote(
       "com.typesafe.play" % "play-ws_2.11" % Dependencies.playVersion,
+      "org.scalatestplus" %% "play" % "1.1.0" % "test",
       requirejs, jquery, knockout, ace, /*requireCss, requireText,*/ keymage, commonsIo, mimeUtil, activatorAnalytics,
-      herokuApi, herokuJson, herokuHttp, jgit,
       sbtLauncherInterface % "provided",
       sbtrcRemoteController % "compile;test->test",
       // Here we hack our probes into the UI project.
