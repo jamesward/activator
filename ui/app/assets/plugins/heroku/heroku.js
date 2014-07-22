@@ -140,6 +140,7 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
 
   HerokuState.deploy = function(app) {
     HerokuState.state(HerokuState.STATE_DEPLOY);
+    HerokuState.deployLogs("");
     var url = "/api/heroku/deploy/" + app.name + "?location=" + window.serverAppModel.location;
     // jquery doesn't support reading chunked responses
     var xhr = new XMLHttpRequest();
