@@ -31,6 +31,10 @@ trait Heroku {
   private def jsonError(message: String): JsObject = Json.obj("error" -> message)
   private def jsonError(error: Exception): JsObject = jsonError(error.getMessage)
 
+  val standardError: PartialFunction[Throwable, Result] = {
+    case e: Exception => InternalServerError(jsonError(e))
+  }
+
   def login(location: String) = Action.async(parse.json) { implicit request =>
 
     val maybeApiKeyFuture = for {
@@ -68,19 +72,13 @@ trait Heroku {
     HerokuAPI.getApps(request.apiKey).map { apps =>
       implicit val appFormat = HerokuAPI.appFormat
       Ok(Json.toJson(apps))
-    } recover {
-      case e: Exception =>
-        InternalServerError(jsonError(e))
-    }
+    } recover standardError
   }
 
   def createApp(location: String) = Authenticated(location).async { implicit request =>
     HerokuAPI.createApp(request.apiKey).map { app =>
       Created(Json.toJson(app)(HerokuAPI.appFormat)).addingToSession(SESSION_APP(location) -> app.name)
-    } recover {
-      case e: Exception =>
-        InternalServerError(jsonError(e))
-    }
+    } recover standardError
   }
 
   // todo: when build is complete, close the stream
@@ -92,24 +90,23 @@ trait Heroku {
       HerokuAPI.buildSlug(request.apiKey, app, url).map {
         case (headers, enumerator) =>
           Ok.chunked(enumerator)
-      } recover {
-        case e: Exception =>
-          InternalServerError(jsonError(e))
-      }
-    } recover {
-      case e: Exception =>
-        InternalServerError(jsonError(e))
-    }
+      } recover standardError
+    } recover standardError
   }
 
   def logs(location: String, app: String) = Authenticated(location).async { request =>
     HerokuAPI.logs(request.apiKey, app).map {
       case (headers, enumerator) =>
         Ok.chunked(enumerator)
-    } recover {
-      case e: Exception =>
-        InternalServerError(jsonError(e))
-    }
+    } recover standardError
+  }
+
+  def getConfigVars(location: String, app: String) = Authenticated(location).async { request =>
+    HerokuAPI.getConfigVars(request.apiKey, app).map(Ok(_))
+  }
+
+  def setConfigVars(location: String, app: String) = Authenticated(location).async(parse.json) { request =>
+    HerokuAPI.setConfigVars(request.apiKey, app, request.body).map(Ok(_)).recover(standardError)
   }
 
   class HerokuRequest[A](val apiKey: String, request: Request[A]) extends WrappedRequest[A](request)
@@ -256,6 +253,14 @@ object HerokuAPI {
       val url = (json \ "output_stream_url").as[String]
       WS.url(url).stream()
     }))
+  }
+
+  def getConfigVars(apiKey: String, appName: String): Future[JsValue] = {
+    ws(s"apps/$appName/config-vars", apiKey).get().flatMap(handle(Status.OK, identity))
+  }
+
+  def setConfigVars(apiKey: String, appName: String, configVars: JsValue): Future[JsValue] = {
+    ws(s"apps/$appName/config-vars", apiKey).patch(configVars).flatMap(handle(Status.OK, identity))
   }
 
   case class App(name: String, web_url: String)

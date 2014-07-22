@@ -5,16 +5,39 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
 
   var HerokuState = {};
 
-  HerokuState.initialized = ko.observable(false);
+  HerokuState.STATE_INIT = "init";
+  HerokuState.STATE_HOME = "home";
+  HerokuState.STATE_LOGIN = "login";
+  HerokuState.STATE_DEPLOY = "deploy";
+  HerokuState.STATE_LOGS = "logs";
+  HerokuState.STATE_CONFIG_VARS = "config_vars";
+
+  HerokuState.state = ko.observable(HerokuState.STATE_INIT);
+
+  HerokuState.loggedIn = ko.observable(false);
 
   HerokuState.errorMessage = ko.observable();
 
   HerokuState.herokuEmail = ko.observable();
   HerokuState.herokuPassword = ko.observable();
 
+  HerokuState.deployLogs = ko.observable();
+
   HerokuState.logs = ko.observable();
 
   HerokuState.apps = ko.observableArray([]);
+
+  HerokuState.configVarsObject = ko.observable({});
+  HerokuState.configVars = ko.computed(function() {
+    var a = [];
+    for (configVar in HerokuState.configVarsObject()) {
+      a.push({name: configVar, value: HerokuState.configVarsObject()[configVar]});
+    }
+    return a;
+  });
+
+  HerokuState.newConfigName = ko.observable();
+  HerokuState.newConfigValue = ko.observable();
 
   HerokuState.selectedApp = ko.observable();
 
@@ -84,9 +107,12 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
       type: "POST",
       success: function (data) {
         HerokuState.apps([]);
+        HerokuState.state(HerokuState.STATE_LOGIN);
         HerokuState.selectedApp(undefined);
         HerokuState.loggedIn(false);
         HerokuState.logs("");
+        HerokuState.deployLogs("");
+        HerokuState.configVars([]);
       },
       error: function (error) {
         console.log(error);
@@ -97,29 +123,35 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
   HerokuState.getApps = function() {
     $.getJSON("/api/heroku/apps?location=" + window.serverAppModel.location).
       success(function(data) {
-        HerokuState.initialized(true);
+        HerokuState.state(HerokuState.STATE_HOME);
         HerokuState.apps(data);
         HerokuState.getDefaultApp();
         HerokuState.loggedIn(true);
       }).
       error(function(error) {
-        HerokuState.initialized(true);
-        console.log(error);
+        if (error.status == 401) {
+          HerokuState.state(HerokuState.STATE_LOGIN);
+        }
+        else {
+          console.log(error);
+        }
       });
   };
 
   HerokuState.deploy = function(app) {
+    HerokuState.state(HerokuState.STATE_DEPLOY);
     var url = "/api/heroku/deploy/" + app.name + "?location=" + window.serverAppModel.location;
     // jquery doesn't support reading chunked responses
     var xhr = new XMLHttpRequest();
     xhr.open("PUT", url, true);
     xhr.onprogress = function () {
-      HerokuState.logs(xhr.responseText);
+      HerokuState.deployLogs(xhr.responseText);
     };
     xhr.send();
   };
 
   HerokuState.getLogs = function(app) {
+    HerokuState.state(HerokuState.STATE_LOGS);
     var url = "/api/heroku/logs/" + app.name + "?location=" + window.serverAppModel.location;
     // jquery doesn't support reading chunked responses
     var xhr = new XMLHttpRequest();
@@ -130,7 +162,46 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
     xhr.send();
   };
 
-  HerokuState.loggedIn = ko.observable(false);
+  HerokuState.getConfigVars = function(app) {
+    $.getJSON("/api/heroku/config-vars/" + app.name + "?location=" + window.serverAppModel.location).
+      success(function(data) {
+        HerokuState.state(HerokuState.STATE_CONFIG_VARS);
+        HerokuState.configVarsObject(data);
+      }).
+      error(function(error) {
+        console.log(error);
+      });
+  };
+
+  HerokuState.setConfigVars = function() {
+    var configVars = {};
+
+    if ((HerokuState.newConfigName() != undefined) && (HerokuState.newConfigValue() != undefined)) {
+      configVars[HerokuState.newConfigName()] = HerokuState.newConfigValue();
+    }
+
+    HerokuState.configVars().forEach(function(configVar) {
+      var value = configVar.value;
+      if (value == "") {
+        value = null;
+      }
+      configVars[configVar.name] = value;
+    });
+
+    $.ajax("/api/heroku/config-vars/" + HerokuState.selectedApp().name + "?location=" + window.serverAppModel.location, {
+      data: JSON.stringify(configVars),
+      type: "PATCH",
+      contentType: "application/json",
+      success: function (data) {
+        HerokuState.configVarsObject(data);
+        HerokuState.newConfigName(undefined);
+        HerokuState.newConfigValue(undefined);
+      },
+      error: function (error) {
+        HerokuState.errorMessage(error.responseJSON.error);
+      }
+    });
+  };
 
   HerokuState.getApps();
 

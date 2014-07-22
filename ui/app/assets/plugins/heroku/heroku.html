@@ -22,15 +22,16 @@
                 <a data-bind="attr: { href: 'https://dashboard.heroku.com/apps/' + name }" target="_blank" class="button">Manage</a>
                 <a href="#" data-bind="click: $parent.deploy" class="button">Deploy</a>
                 <a href="#" data-bind="click: $parent.getLogs" class="button">Logs</a>
+                <a href="#" data-bind="click: $parent.getConfigVars" class="button">Config Vars</a>
             </div>
         </div>
     </nav>
     <section>
         <header>
-            <h1 data-bind="visible: !loggedIn() && initialized">Login to Heroku (<a href="https://id.heroku.com/signup" target="_blank" style="text-decoration: underline">Sign Up for Free</a>)</h1>
-            <h1 data-bind="visible: loggedIn() && initialized">Logged Into Heroku (<a href="#" data-bind="click: logout" style="text-decoration: underline">Logout</a>)</h1>
+            <h1 data-bind="visible: !loggedIn() && state() != STATE_INIT">Login to Heroku (<a href="https://id.heroku.com/signup" target="_blank" style="text-decoration: underline">Sign Up for Free</a>)</h1>
+            <h1 data-bind="visible: loggedIn() && state() != STATE_INIT">Logged Into Heroku (<a href="#" data-bind="click: logout" style="text-decoration: underline">Logout</a>)</h1>
         </header>
-        <article class="page typo wrapper" data-bind="visible: !loggedIn() && initialized">
+        <article class="page typo wrapper" data-bind="visible: state() == STATE_LOGIN">
             <span class="error" data-bind="text: errorMessage"></span>
             <form data-bind="submit: login">
                 <label for="herokuEmail">Email:</label>
@@ -40,8 +41,32 @@
                 <button type="submit">Login</button>
             </form>
         </article>
-        <article class="page typo wrapper" data-bind="visible: loggedIn() && initialized">
+        <article class="page typo wrapper" data-bind="visible: state() == STATE_DEPLOY">
+            <pre style="border: none"><code data-bind="text: deployLogs"></code></pre>
+        </article>
+        <article class="page typo wrapper" data-bind="visible: state() == STATE_LOGS">
             <pre style="border: none"><code data-bind="text: logs"></code></pre>
+        </article>
+        <article class="page typo wrapper" data-bind="visible: state() == STATE_CONFIG_VARS">
+            <form class="config-vars" data-bind="submit: setConfigVars">
+                <table>
+                    <tbody data-bind="foreach: configVars">
+                        <tr>
+                            <td><input type="text" class="config-var-name" data-bind="value: name" disabled></td>
+                            <td><input type="text" class="config-var-value" data-bind="value: value"></td>
+                        </tr>
+                    </tbody>
+                    <tbody>
+                        <tr>
+                            <td><input class="config-var-name" name="newConfigVarName" placeholder="NEW_CONFIG_VAR" data-bind="value: newConfigName"></td>
+                            <td class="config-var-value"><input class="config-var-value" name="newConfigVarValue" placeholder="VALUE" data-bind="value: newConfigValue"></td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><button>Save</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </form>
         </article>
     </section>
 </article>
