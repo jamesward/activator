@@ -119,7 +119,7 @@ trait Heroku {
     HerokuAPI.buildLogs(url).map {
       case (headers, enumerator) =>
         Ok.chunked(enumerator)
-    }
+    } recover standardError
   }
 
   def getConfigVars(location: String, app: String) = Authenticated(location).async { request =>
@@ -245,7 +245,7 @@ object HerokuAPI {
 
   def logs(apiKey: String, appName: String): Future[(WSResponseHeaders, Enumerator[Array[Byte]])] = {
 
-    val requestJson = Json.obj("tail" -> true)
+    val requestJson = Json.obj("tail" -> true, "lines" -> 10)
 
     ws(s"apps/$appName/log-sessions", apiKey).post(requestJson).flatMap(handleAsync(Status.CREATED, { response =>
       val url = (response \ "logplex_url").as[String]
