@@ -154,7 +154,7 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
       type: "PUT",
       success: function (data) {
         HerokuState.deployLogs("Your app is being built...");
-        HerokuState.getBuildLogs(app, data.output_stream_url);
+        HerokuState.streamLogs(data.output_stream_url, HerokuState.deployLogs);
       },
       error: function (error) {
         console.error(error);
@@ -163,33 +163,28 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
   };
 
   // todo: when Heroku supports CORS just connect to the url directly
-  HerokuState.getBuildLogs = function(app, url) {
-    HerokuState.state(HerokuState.STATE_DEPLOY);
+  HerokuState.streamLogs = function(url, output) {
     // jquery doesn't support reading chunked responses
     var xhr = new XMLHttpRequest();
-    xhr.open("GET", "/api/heroku/build-logs?location=" + window.serverAppModel.location + "&url=" + url, true);
+    xhr.open("GET", "/api/heroku/log-stream?url=" + url, true);
     xhr.onprogress = function () {
       if (xhr.responseText.length > 0) {
-        HerokuState.deployLogs(xhr.responseText);
+        output(xhr.responseText);
       }
     };
     xhr.send();
   };
 
-  // todo: when Heroku supports CORS just connect to the url directly
   HerokuState.getLogs = function(app) {
     HerokuState.state(HerokuState.STATE_LOGS);
     HerokuState.logs("Fetching logs...");
-    var url = "/api/heroku/logs/" + app.name + "?location=" + window.serverAppModel.location;
-    // jquery doesn't support reading chunked responses
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", url, true);
-    xhr.onprogress = function () {
-      if (xhr.responseText.length > 0) {
-        HerokuState.logs(xhr.responseText);
-      }
-    };
-    xhr.send();
+    $.getJSON("/api/heroku/logs/" + app.name + "?location=" + window.serverAppModel.location).
+      success(function(data) {
+        HerokuState.streamLogs(data.logplex_url, HerokuState.logs);
+      }).
+      error(function(error) {
+        console.error(error);
+      });
   };
 
   HerokuState.getConfigVars = function(app) {
