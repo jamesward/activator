@@ -103,11 +103,8 @@ trait Heroku {
 
     val createSlugFuture = HerokuAPI.createSlug(request.apiKey, app, new File(location))
 
-    createSlugFuture.flatMap { url =>
-      HerokuAPI.buildSlug(request.apiKey, app, url).map {
-        case (headers, enumerator) =>
-          Ok.chunked(enumerator)
-      } recover standardError
+    createSlugFuture.flatMap { slugUrl =>
+      HerokuAPI.buildSlug(request.apiKey, app, slugUrl).map(Ok(_))
     } recover standardError
   }
 
@@ -118,12 +115,15 @@ trait Heroku {
     } recover standardError
   }
 
-  def buildLogs(location: String, app: String, id: String) = Authenticated(location) { request =>
-    Ok.chunked(HerokuAPI.buildLogs(request.apiKey, app, id))
+  def buildLogs(location: String, url: String) = Authenticated(location).async { request =>
+    HerokuAPI.buildLogs(url).map {
+      case (headers, enumerator) =>
+        Ok.chunked(enumerator)
+    }
   }
 
   def getConfigVars(location: String, app: String) = Authenticated(location).async { request =>
-    HerokuAPI.getConfigVars(request.apiKey, app).map(Ok(_))
+    HerokuAPI.getConfigVars(request.apiKey, app).map(Ok(_)).recover(standardError)
   }
 
   def setConfigVars(location: String, app: String) = Authenticated(location).async(parse.json) { request =>
@@ -197,7 +197,7 @@ object HerokuAPI {
 
   def appSetup(apiKey: String, blobUrl: String): Future[JsValue] = {
     val requestJson = Json.obj("source_blob" -> Json.obj("url" -> blobUrl))
-    ws("app-setups", apiKey).post(requestJson).flatMap { response =>
+    ws("app-setups", apiKey, "edge").post(requestJson).flatMap { response =>
       val id = (response.json \ "id").as[String]
 
       // poll for completion
@@ -232,7 +232,7 @@ object HerokuAPI {
   }
 
   def appSetupStatus(apiKey: String, id: String): Future[JsValue] = {
-    ws(s"app-setups/$id", apiKey).get().flatMap(handle(Status.OK, identity))
+    ws(s"app-setups/$id", apiKey, "edge").get().flatMap(handle(Status.OK, identity))
   }
 
   def destroyApp(apiKey: String, appName: String): Future[_] = {
@@ -257,30 +257,8 @@ object HerokuAPI {
     ws(s"apps/$appName/builds/$id/result", apiKey).get().flatMap(handle(Status.OK, identity))
   }
 
-  // todo: this is chatty but there isn't a way to get the build output stream url (yet?)
-  def buildLogs(apiKey: String, appName: String, id: String): Enumerator[Array[Byte]] = {
-    Enumerator.empty[Array[Byte]]
-    /*
-    // this hammers the build status api but isn't useful because we don't get any build output until the build is complete
-    Enumerator.generateM {
-      buildResult(apiKey, appName, id).map { json =>
-        val status = (json \ "build" \ "status").as[String]
-        val lines = (json \\ "line").map(_.as[String])
-        status match {
-          case "pending" =>
-            Some(lines.mkString("\n").getBytes)
-          case "failed" =>
-            None
-          case "succeeded" =>
-            None
-        }
-      } recover {
-        case e: Exception =>
-          e.printStackTrace()
-          None
-      }
-    }
-    */
+  def buildLogs(url: String): Future[(WSResponseHeaders, Enumerator[Array[Byte]])] = {
+    WS.url(url).stream()
   }
 
   def createSlug(apiKey: String, appName: String, appDir: File): Future[String] = {
@@ -317,8 +295,8 @@ object HerokuAPI {
 
   // side effecting!!!
   def addToTar(tOut: TarArchiveOutputStream, path: String, base: String): Unit = {
-    // manual exclude of target dirs
-    if (!base.endsWith("target/") && !path.endsWith("target")) {
+    // manual exclude of target dirs & local.conf
+    if (!base.endsWith("target/") && !path.endsWith("target") && !path.endsWith("local.conf")) {
       val f = new File(path)
       val entryName = base + f.getName
       val tarEntry = new TarArchiveEntry(f, entryName)
@@ -336,14 +314,11 @@ object HerokuAPI {
     }
   }
 
-  def buildSlug(apiKey: String, appName: String, url: String): Future[(WSResponseHeaders, Enumerator[Array[Byte]])] = {
+  def buildSlug(apiKey: String, appName: String, url: String): Future[JsValue] = {
     val requestJson = Json.obj("source_blob" -> Json.obj("url" -> url))
 
     // set the api version to 'edge' in order to get the output_stream_url
-    ws(s"apps/$appName/builds", apiKey, "edge").post(requestJson).flatMap(handleAsync(Status.CREATED, { json =>
-      val url = (json \ "output_stream_url").as[String]
-      WS.url(url).stream()
-    }))
+    ws(s"apps/$appName/builds", apiKey, "edge").post(requestJson).flatMap(handle(Status.CREATED, identity))
   }
 
   def getConfigVars(apiKey: String, appName: String): Future[JsValue] = {

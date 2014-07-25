@@ -64,25 +64,25 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
       $.ajax("/api/heroku/apps/default/" + HerokuState.selectedApp().name + "?location=" + window.serverAppModel.location, {
         type: "PUT",
         error: function (error) {
-          console.log(error);
+          console.error(error);
         }
       });
     }
   };
 
   HerokuState.createNewApp = function() {
+    HerokuState.state(HerokuState.STATE_DEPLOY);
+    HerokuState.deployLogs("Your app is being created...");
     $.ajax("/api/heroku/apps?location=" + window.serverAppModel.location, {
       type: "POST",
       success: function(data) {
         var app = {name: data.app.name, web_url: "http://" + data.app.name + ".herokuapp.com"};
         HerokuState.apps.push(app);
         HerokuState.selectedApp(app);
-        HerokuState.state(HerokuState.STATE_DEPLOY);
-        HerokuState.getBuildLogs(app, data.build.id);
+        HerokuState.getBuildLogs(app, data.build.output_stream_url);
       },
       error: function(error) {
-        // todo: display this somewhere
-        console.log(error);
+        console.error(error);
       }
     });
   };
@@ -120,7 +120,7 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
         HerokuState.configVars([]);
       },
       error: function (error) {
-        console.log(error);
+        console.error(error);
       }
     });
   };
@@ -138,30 +138,34 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
           HerokuState.state(HerokuState.STATE_LOGIN);
         }
         else {
-          console.log(error);
+          console.error(error);
         }
       });
   };
 
   HerokuState.deploy = function(app) {
     HerokuState.state(HerokuState.STATE_DEPLOY);
-    HerokuState.deployLogs("");
+    HerokuState.deployLogs("Your app is being uploaded...");
+
     var url = "/api/heroku/deploy/" + app.name + "?location=" + window.serverAppModel.location;
-    // jquery doesn't support reading chunked responses
-    var xhr = new XMLHttpRequest();
-    xhr.open("PUT", url, true);
-    xhr.onprogress = function () {
-      HerokuState.deployLogs(xhr.responseText);
-    };
-    xhr.send();
+
+    $.ajax(url, {
+      type: "PUT",
+      success: function (data) {
+        HerokuState.getBuildLogs(app, data.output_stream_url);
+      },
+      error: function (error) {
+        console.error(error);
+      }
+    });
   };
 
-  HerokuState.getBuildLogs = function(app, id) {
-    HerokuState.state(HerokuState.STATE_LOGS);
-    var url = "/api/heroku/build-logs/" + app.name + "/" + id + "?location=" + window.serverAppModel.location;
+  HerokuState.getBuildLogs = function(app, url) {
+    HerokuState.state(HerokuState.STATE_DEPLOY);
+    HerokuState.deployLogs("");
     // jquery doesn't support reading chunked responses
     var xhr = new XMLHttpRequest();
-    xhr.open("GET", url, true);
+    xhr.open("GET", "/api/heroku/build-logs?location=" + window.serverAppModel.location + "&url=" + url, true);
     xhr.onprogress = function () {
       HerokuState.deployLogs(xhr.responseText);
     };
@@ -187,7 +191,7 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
         HerokuState.configVarsObject(data);
       }).
       error(function(error) {
-        console.log(error);
+        console.error(error);
       });
   };
 
