@@ -4,20 +4,23 @@
 package controllers.api
 
 import java.io.{ BufferedOutputStream, File, FileInputStream, FileOutputStream }
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 
 import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
 import org.apache.commons.compress.utils.IOUtils
 import play.api.Play.current
 import play.api.http.Status
+import play.api.libs.concurrent.Akka
 import play.api.libs.iteratee.Enumerator
 import play.api.libs.json.{ JsObject, JsValue, Json }
 import play.api.libs.ws._
 import play.api.mvc.Security.{ AuthenticatedBuilder, AuthenticatedRequest }
 import play.api.mvc._
 
+import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.{ Promise, Future }
 
 // todo: csrf
 
@@ -75,9 +78,23 @@ trait Heroku {
     } recover standardError
   }
 
+  // this uses the app-setup api so that the app.json configures the app on heroku
   def createApp(location: String) = Authenticated(location).async { implicit request =>
-    HerokuAPI.createApp(request.apiKey).map { app =>
-      Created(Json.toJson(app)(HerokuAPI.appFormat)).addingToSession(SESSION_APP(location) -> app.name)
+    // create a temporary app so we can host the app blob in it's slug storage
+    HerokuAPI.createApp(request.apiKey).flatMap { tmpApp =>
+      HerokuAPI.createSlug(request.apiKey, tmpApp.name, new File(location)).flatMap { url =>
+        val appSetupFuture = HerokuAPI.appSetup(request.apiKey, url)
+
+        appSetupFuture.onComplete { _ =>
+          // destroy the temporary app
+          HerokuAPI.destroyApp(request.apiKey, tmpApp.name)
+        }
+
+        appSetupFuture.map { json =>
+          val appName = (json \ "app" \ "name").as[String]
+          Created(json).addingToSession(SESSION_APP(location) -> appName)
+        }
+      }
     } recover standardError
   }
 
@@ -99,6 +116,10 @@ trait Heroku {
       case (headers, enumerator) =>
         Ok.chunked(enumerator)
     } recover standardError
+  }
+
+  def buildLogs(location: String, app: String, id: String) = Authenticated(location) { request =>
+    Ok.chunked(HerokuAPI.buildLogs(request.apiKey, app, id))
   }
 
   def getConfigVars(location: String, app: String) = Authenticated(location).async { request =>
@@ -174,6 +195,46 @@ object HerokuAPI {
     ws("apps", apiKey).post(Results.EmptyContent()).flatMap(handle(Status.CREATED, _.as[App]))
   }
 
+  def appSetup(apiKey: String, blobUrl: String): Future[JsValue] = {
+    val requestJson = Json.obj("source_blob" -> Json.obj("url" -> blobUrl))
+    ws("app-setups", apiKey).post(requestJson).flatMap { response =>
+      val id = (response.json \ "id").as[String]
+
+      // poll for completion
+
+      val appSetupPromise = Promise[JsValue]()
+
+      val tick = Akka.system.scheduler.schedule(Duration.Zero, 1.second, new Runnable {
+        override def run() = {
+          appSetupStatus(apiKey, id).foreach { json =>
+            val status = (json \ "status").as[String]
+            status match {
+              case "failed" =>
+                val message = (json \ "failure_message").as[String] + " " + (json \ "manifest_errors").as[Seq[String]].mkString
+                appSetupPromise.failure(new RuntimeException(message))
+              case "succeeded" =>
+                appSetupPromise.success(json)
+              case "pending" =>
+                // see if the build has started
+                // once the build starts we complete the promise
+                if ((json \ "build" \ "id").asOpt[String].isDefined) {
+                  appSetupPromise.success(json)
+                }
+            }
+          }
+        }
+      })
+
+      appSetupPromise.future.onComplete(_ => tick.cancel())
+
+      appSetupPromise.future
+    }
+  }
+
+  def appSetupStatus(apiKey: String, id: String): Future[JsValue] = {
+    ws(s"app-setups/$id", apiKey).get().flatMap(handle(Status.OK, identity))
+  }
+
   def destroyApp(apiKey: String, appName: String): Future[_] = {
     ws(s"apps/$appName", apiKey).delete()
   }
@@ -190,6 +251,36 @@ object HerokuAPI {
       val url = (response \ "logplex_url").as[String]
       WS.url(url).stream()
     }))
+  }
+
+  def buildResult(apiKey: String, appName: String, id: String): Future[JsValue] = {
+    ws(s"apps/$appName/builds/$id/result", apiKey).get().flatMap(handle(Status.OK, identity))
+  }
+
+  // todo: this is chatty but there isn't a way to get the build output stream url (yet?)
+  def buildLogs(apiKey: String, appName: String, id: String): Enumerator[Array[Byte]] = {
+    Enumerator.empty[Array[Byte]]
+    /*
+    // this hammers the build status api but isn't useful because we don't get any build output until the build is complete
+    Enumerator.generateM {
+      buildResult(apiKey, appName, id).map { json =>
+        val status = (json \ "build" \ "status").as[String]
+        val lines = (json \\ "line").map(_.as[String])
+        status match {
+          case "pending" =>
+            Some(lines.mkString("\n").getBytes)
+          case "failed" =>
+            None
+          case "succeeded" =>
+            None
+        }
+      } recover {
+        case e: Exception =>
+          e.printStackTrace()
+          None
+      }
+    }
+    */
   }
 
   def createSlug(apiKey: String, appName: String, appDir: File): Future[String] = {
