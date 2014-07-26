@@ -35,6 +35,7 @@ POST        /api/heroku/login                            controllers.api.Heroku.
 POST        /api/heroku/logout                           controllers.api.Heroku.logout(location)
 GET         /api/heroku/apps                             controllers.api.Heroku.getApps(location)
 POST        /api/heroku/apps                             controllers.api.Heroku.createApp(location)
+POST        /api/heroku/app-setup                        controllers.api.Heroku.appSetup(location)
 GET         /api/heroku/apps/default                     controllers.api.Heroku.getDefaultApp(location)
 PUT         /api/heroku/apps/default/:app                controllers.api.Heroku.setDefaultApp(location, app)
 PUT         /api/heroku/deploy/:app                      controllers.api.Heroku.deploy(location, app)

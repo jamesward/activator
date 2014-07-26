@@ -73,14 +73,15 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
   HerokuState.createNewApp = function() {
     HerokuState.state(HerokuState.STATE_DEPLOY);
     HerokuState.deployLogs("Your app is being created...");
-    $.ajax("/api/heroku/apps?location=" + window.serverAppModel.location, {
+    $.ajax("/api/heroku/app-setup?location=" + window.serverAppModel.location, {
       type: "POST",
       success: function(data) {
         HerokuState.deployLogs("Your app is being built...");
         var app = {name: data.app.name, web_url: "http://" + data.app.name + ".herokuapp.com"};
         HerokuState.apps.push(app);
         HerokuState.selectedApp(app);
-        HerokuState.getBuildLogs(app, data.build.output_stream_url);
+        HerokuState.state(HerokuState.STATE_DEPLOY);
+        HerokuState.streamLogs(data.build.output_stream_url, HerokuState.deployLogs);
       },
       error: function(error) {
         console.error(error);

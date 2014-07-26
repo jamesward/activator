@@ -139,12 +139,10 @@ class HerokuSpec extends PlaySpec with Results with OneAppPerSuite {
   // cleanup the app
   "logs" must {
     "get the log stream" in withApp { maybeAuthAndApp =>
-      // Wait here because:
-      // Logplex was just enabled for this app. Please try fetching logs again in a few seconds.
-      Thread.sleep(5000)
-
       maybeAuthAndApp.map {
         case (apiKey, herokuApp, appDir) =>
+          // Wait here because it takes a few for logplex to be enabled
+          Thread.sleep(5000)
           val result = new TestController().logs(appDir.getAbsolutePath, herokuApp.name)(fakeRequest(appDir, apiKey))
           status(result) must equal(OK)
         // todo: test the chunked content somehow
@@ -157,8 +155,8 @@ class HerokuSpec extends PlaySpec with Results with OneAppPerSuite {
       maybeAuthAndApp.map {
         case (apiKey, herokuApp, appDir) =>
 
-          val sampleApp = new File(appDir, "index.php")
-          IO.write(sampleApp, "hello, world")
+          IO.write(new File(appDir, "index.php"), "hello, world")
+          IO.write(new File(appDir, "app.json"), "{}")
 
           val result = new TestController().deploy(appDir.getAbsolutePath, herokuApp.name)(fakeRequest(appDir, apiKey))
           status(result) must equal(OK)

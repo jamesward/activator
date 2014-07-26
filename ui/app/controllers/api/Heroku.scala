@@ -4,7 +4,6 @@
 package controllers.api
 
 import java.io.{ BufferedOutputStream, File, FileInputStream, FileOutputStream }
-import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 
 import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
@@ -78,8 +77,12 @@ trait Heroku {
     } recover standardError
   }
 
+  def createApp(location: String) = Authenticated(location).async { request =>
+    HerokuAPI.createApp(request.apiKey).map(app => Created(Json.toJson(app))).recover(standardError)
+  }
+
   // this uses the app-setup api so that the app.json configures the app on heroku
-  def createApp(location: String) = Authenticated(location).async { implicit request =>
+  def appSetup(location: String) = Authenticated(location).async { implicit request =>
     // create a temporary app so we can host the app blob in it's slug storage
     HerokuAPI.createApp(request.apiKey).flatMap { tmpApp =>
       HerokuAPI.createSlug(request.apiKey, tmpApp.name, new File(location)).flatMap { url =>
@@ -208,14 +211,14 @@ object HerokuAPI {
             status match {
               case "failed" =>
                 val message = (json \ "failure_message").as[String] + " " + (json \ "manifest_errors").as[Seq[String]].mkString
-                appSetupPromise.failure(new RuntimeException(message))
+                appSetupPromise.tryFailure(new RuntimeException(message))
               case "succeeded" =>
-                appSetupPromise.success(json)
+                appSetupPromise.trySuccess(json)
               case "pending" =>
                 // see if the build has started
                 // once the build starts we complete the promise
                 if ((json \ "build" \ "id").asOpt[String].isDefined) {
-                  appSetupPromise.success(json)
+                  appSetupPromise.trySuccess(json)
                 }
             }
           }
@@ -256,8 +259,8 @@ object HerokuAPI {
 
   def createSlug(apiKey: String, appName: String, appDir: File): Future[String] = {
     val requestJson = Json.obj("process_types" -> Json.obj())
-    ws(s"/apps/$appName/slugs", apiKey).post(requestJson).flatMap(handleAsync(Status.CREATED, { response =>
 
+    ws(s"/apps/$appName/slugs", apiKey).post(requestJson).flatMap(handleAsync(Status.CREATED, { response =>
       val id = (response \ "id").as[String]
 
       val url = (response \ "blob" \ "url").as[String]
@@ -268,8 +271,10 @@ object HerokuAPI {
       val tgzos = new TarArchiveOutputStream(new GZIPOutputStream(new BufferedOutputStream(new FileOutputStream(tgzFile))))
 
       // start with the files, not the dir
-      appDir.listFiles.foreach { file =>
-        addToTar(tgzos, file.getAbsolutePath, "")
+      if (appDir.listFiles != null) {
+        appDir.listFiles.foreach { file =>
+          addToTar(tgzos, file.getAbsolutePath, "")
+        }
       }
 
       tgzos.finish()
