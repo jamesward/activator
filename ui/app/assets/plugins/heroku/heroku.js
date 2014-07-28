@@ -173,6 +173,10 @@ define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, templat
         output(xhr.responseText);
       }
     };
+    xhr.onerror = function() {
+      // retry
+      HerokuState.streamLogs(url, output);
+    };
     xhr.send();
   };
 
