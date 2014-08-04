@@ -3,237 +3,241 @@
  */
 define(['jquery', 'text!./heroku.html', 'css!./heroku.css'], function($, template) {
 
-  var HerokuState = {};
+  var HerokuState = (function() {
+    var self = {};
 
-  HerokuState.STATE_INIT = "init";
-  HerokuState.STATE_HOME = "home";
-  HerokuState.STATE_LOGIN = "login";
-  HerokuState.STATE_DEPLOY = "deploy";
-  HerokuState.STATE_LOGS = "logs";
-  HerokuState.STATE_CONFIG_VARS = "config_vars";
+    self.STATE_INIT = "init";
+    self.STATE_HOME = "home";
+    self.STATE_LOGIN = "login";
+    self.STATE_DEPLOY = "deploy";
+    self.STATE_LOGS = "logs";
+    self.STATE_CONFIG_VARS = "config_vars";
 
-  HerokuState.state = ko.observable(HerokuState.STATE_INIT);
+    self.state = ko.observable(self.STATE_INIT);
 
-  HerokuState.loggedIn = ko.observable(false);
+    self.loggedIn = ko.observable(false);
 
-  HerokuState.errorMessage = ko.observable();
+    self.errorMessage = ko.observable();
 
-  HerokuState.herokuEmail = ko.observable();
-  HerokuState.herokuPassword = ko.observable();
+    self.herokuEmail = ko.observable();
+    self.herokuPassword = ko.observable();
 
-  HerokuState.deployLogs = ko.observable();
+    self.deployLogs = ko.observable();
 
-  HerokuState.logs = ko.observable();
+    self.logs = ko.observable();
 
-  HerokuState.apps = ko.observableArray([]);
+    self.apps = ko.observableArray([]);
 
-  HerokuState.configVarsObject = ko.observable({});
-  HerokuState.configVars = ko.computed(function() {
-    var a = [];
-    for (configVar in HerokuState.configVarsObject()) {
-      a.push({name: configVar, value: HerokuState.configVarsObject()[configVar]});
-    }
-    return a;
-  });
+    self.configVarsObject = ko.observable({});
+    self.configVars = ko.computed(function() {
+      var a = [];
+      for (configVar in self.configVarsObject()) {
+        a.push({name: configVar, value: self.configVarsObject()[configVar]});
+      }
+      return a;
+    });
 
-  HerokuState.newConfigName = ko.observable();
-  HerokuState.newConfigValue = ko.observable();
+    self.newConfigName = ko.observable();
+    self.newConfigValue = ko.observable();
 
-  HerokuState.selectedApp = ko.observable();
+    self.selectedApp = ko.observable();
 
-  HerokuState.selectedApp.subscribe(function(newValue) {
-    HerokuState.setDefaultApp();
-    HerokuState.state(HerokuState.STATE_HOME);
-  });
+    self.selectedApp.subscribe(function(newValue) {
+      self.setDefaultApp();
+      self.state(self.STATE_HOME);
+    });
 
-  HerokuState.getDefaultApp = function() {
-    $.ajax("/api/heroku/apps/default?location=" + window.serverAppModel.location, {
-      type: "GET",
-      success: function(data) {
-        HerokuState.apps().forEach(function(app) {
-          if (app.name == data.app) {
-            HerokuState.selectedApp(app);
+    self.getDefaultApp = function() {
+      $.ajax("/api/heroku/apps/default?location=" + window.serverAppModel.location, {
+        type: "GET",
+        success: function(data) {
+          self.apps().forEach(function(app) {
+            if (app.name == data.app) {
+              self.selectedApp(app);
+            }
+          });
+        }
+      });
+    };
+
+    self.setDefaultApp = function() {
+      if (self.selectedApp()) {
+        $.ajax("/api/heroku/apps/default/" + self.selectedApp().name + "?location=" + window.serverAppModel.location, {
+          type: "PUT",
+          error: function (error) {
+            console.error(error);
           }
         });
       }
-    });
-  };
+    };
 
-  HerokuState.setDefaultApp = function() {
-    if (HerokuState.selectedApp()) {
-      $.ajax("/api/heroku/apps/default/" + HerokuState.selectedApp().name + "?location=" + window.serverAppModel.location, {
-        type: "PUT",
+    self.createNewApp = function() {
+      self.state(self.STATE_DEPLOY);
+      self.deployLogs("Your app is being created...");
+      $.ajax("/api/heroku/app-setup?location=" + window.serverAppModel.location, {
+        type: "POST",
+        success: function(data) {
+          self.deployLogs("Your app is being built...");
+          var app = {name: data.app.name, web_url: "http://" + data.app.name + ".herokuapp.com"};
+          self.apps.push(app);
+          self.selectedApp(app);
+          self.state(self.STATE_DEPLOY);
+          self.streamLogs(data.build.output_stream_url, self.deployLogs);
+        },
+        error: function(error) {
+          console.error(error);
+        }
+      });
+    };
+
+    self.login = function(form) {
+      $.ajax("/api/heroku/login?location=" + window.serverAppModel.location, {
+        data: JSON.stringify({
+          username: self.herokuEmail(),
+          password: self.herokuPassword()
+        }),
+        type: "POST",
+        contentType: "application/json",
+        success: function (data) {
+          self.herokuEmail("");
+          self.herokuPassword("");
+          self.loggedIn(true);
+          self.getApps();
+        },
+        error: function (error) {
+          self.errorMessage(error.responseJSON.error);
+        }
+      });
+    };
+
+    self.logout = function(form) {
+      $.ajax("/api/heroku/logout?location=" + window.serverAppModel.location, {
+        type: "POST",
+        success: function (data) {
+          self.apps([]);
+          self.state(self.STATE_LOGIN);
+          self.selectedApp(undefined);
+          self.loggedIn(false);
+          self.logs("");
+          self.deployLogs("");
+          self.configVars([]);
+        },
         error: function (error) {
           console.error(error);
         }
       });
-    }
-  };
+    };
 
-  HerokuState.createNewApp = function() {
-    HerokuState.state(HerokuState.STATE_DEPLOY);
-    HerokuState.deployLogs("Your app is being created...");
-    $.ajax("/api/heroku/app-setup?location=" + window.serverAppModel.location, {
-      type: "POST",
-      success: function(data) {
-        HerokuState.deployLogs("Your app is being built...");
-        var app = {name: data.app.name, web_url: "http://" + data.app.name + ".herokuapp.com"};
-        HerokuState.apps.push(app);
-        HerokuState.selectedApp(app);
-        HerokuState.state(HerokuState.STATE_DEPLOY);
-        HerokuState.streamLogs(data.build.output_stream_url, HerokuState.deployLogs);
-      },
-      error: function(error) {
-        console.error(error);
-      }
-    });
-  };
+    self.getApps = function() {
+      $.getJSON("/api/heroku/apps?location=" + window.serverAppModel.location).
+        success(function(data) {
+          self.state(self.STATE_HOME);
+          self.apps(data);
+          self.getDefaultApp();
+          self.loggedIn(true);
+        }).
+        error(function(error) {
+          if (error.status == 401) {
+            self.state(self.STATE_LOGIN);
+          }
+          else {
+            console.error(error);
+          }
+        });
+    };
 
-  HerokuState.login = function(form) {
-    $.ajax("/api/heroku/login?location=" + window.serverAppModel.location, {
-      data: JSON.stringify({
-        username: HerokuState.herokuEmail(),
-        password: HerokuState.herokuPassword()
-      }),
-      type: "POST",
-      contentType: "application/json",
-      success: function (data) {
-        HerokuState.herokuEmail("");
-        HerokuState.herokuPassword("");
-        HerokuState.loggedIn(true);
-        HerokuState.getApps();
-      },
-      error: function (error) {
-        HerokuState.errorMessage(error.responseJSON.error);
-      }
-    });
-  };
+    self.deploy = function(app) {
+      self.state(self.STATE_DEPLOY);
+      self.deployLogs("Your app is being uploaded...");
 
-  HerokuState.logout = function(form) {
-    $.ajax("/api/heroku/logout?location=" + window.serverAppModel.location, {
-      type: "POST",
-      success: function (data) {
-        HerokuState.apps([]);
-        HerokuState.state(HerokuState.STATE_LOGIN);
-        HerokuState.selectedApp(undefined);
-        HerokuState.loggedIn(false);
-        HerokuState.logs("");
-        HerokuState.deployLogs("");
-        HerokuState.configVars([]);
-      },
-      error: function (error) {
-        console.error(error);
-      }
-    });
-  };
+      var url = "/api/heroku/deploy/" + app.name + "?location=" + window.serverAppModel.location;
 
-  HerokuState.getApps = function() {
-    $.getJSON("/api/heroku/apps?location=" + window.serverAppModel.location).
-      success(function(data) {
-        HerokuState.state(HerokuState.STATE_HOME);
-        HerokuState.apps(data);
-        HerokuState.getDefaultApp();
-        HerokuState.loggedIn(true);
-      }).
-      error(function(error) {
-        if (error.status == 401) {
-          HerokuState.state(HerokuState.STATE_LOGIN);
-        }
-        else {
+      $.ajax(url, {
+        type: "PUT",
+        success: function (data) {
+          self.deployLogs("Your app is being built...");
+          self.streamLogs(data.output_stream_url, self.deployLogs);
+        },
+        error: function (error) {
           console.error(error);
         }
       });
-  };
-
-  HerokuState.deploy = function(app) {
-    HerokuState.state(HerokuState.STATE_DEPLOY);
-    HerokuState.deployLogs("Your app is being uploaded...");
-
-    var url = "/api/heroku/deploy/" + app.name + "?location=" + window.serverAppModel.location;
-
-    $.ajax(url, {
-      type: "PUT",
-      success: function (data) {
-        HerokuState.deployLogs("Your app is being built...");
-        HerokuState.streamLogs(data.output_stream_url, HerokuState.deployLogs);
-      },
-      error: function (error) {
-        console.error(error);
-      }
-    });
-  };
-
-  // todo: when Heroku supports CORS just connect to the url directly
-  HerokuState.streamLogs = function(url, output) {
-    // jquery doesn't support reading chunked responses
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", "/api/heroku/log-stream?url=" + url, true);
-    xhr.onprogress = function () {
-      if (xhr.responseText.length > 0) {
-        output(xhr.responseText);
-      }
     };
-    xhr.onerror = function() {
-      // retry
-      HerokuState.streamLogs(url, output);
+
+    // todo: when Heroku supports CORS just connect to the url directly
+    self.streamLogs = function(url, output) {
+      // jquery doesn't support reading chunked responses
+      var xhr = new XMLHttpRequest();
+      xhr.open("GET", "/api/heroku/log-stream?url=" + url, true);
+      xhr.onprogress = function () {
+        if (xhr.responseText.length > 0) {
+          output(xhr.responseText);
+        }
+      };
+      xhr.onerror = function() {
+        // retry
+        self.streamLogs(url, output);
+      };
+      xhr.send();
     };
-    xhr.send();
-  };
 
-  HerokuState.getLogs = function(app) {
-    HerokuState.state(HerokuState.STATE_LOGS);
-    HerokuState.logs("Fetching logs...");
-    $.getJSON("/api/heroku/logs/" + app.name + "?location=" + window.serverAppModel.location).
-      success(function(data) {
-        HerokuState.streamLogs(data.logplex_url, HerokuState.logs);
-      }).
-      error(function(error) {
-        console.error(error);
-      });
-  };
+    self.getLogs = function(app) {
+      self.state(self.STATE_LOGS);
+      self.logs("Fetching logs...");
+      $.getJSON("/api/heroku/logs/" + app.name + "?location=" + window.serverAppModel.location).
+        success(function(data) {
+          self.streamLogs(data.logplex_url, self.logs);
+        }).
+        error(function(error) {
+          console.error(error);
+        });
+    };
 
-  HerokuState.getConfigVars = function(app) {
-    $.getJSON("/api/heroku/config-vars/" + app.name + "?location=" + window.serverAppModel.location).
-      success(function(data) {
-        HerokuState.state(HerokuState.STATE_CONFIG_VARS);
-        HerokuState.configVarsObject(data);
-      }).
-      error(function(error) {
-        console.error(error);
-      });
-  };
+    self.getConfigVars = function(app) {
+      $.getJSON("/api/heroku/config-vars/" + app.name + "?location=" + window.serverAppModel.location).
+        success(function(data) {
+          self.state(self.STATE_CONFIG_VARS);
+          self.configVarsObject(data);
+        }).
+        error(function(error) {
+          console.error(error);
+        });
+    };
 
-  HerokuState.setConfigVars = function() {
-    var configVars = {};
+    self.setConfigVars = function() {
+      var configVars = {};
 
-    if ((HerokuState.newConfigName() != undefined) && (HerokuState.newConfigValue() != undefined)) {
-      configVars[HerokuState.newConfigName()] = HerokuState.newConfigValue();
-    }
-
-    HerokuState.configVars().forEach(function(configVar) {
-      var value = configVar.value;
-      if (value == "") {
-        value = null;
+      if ((self.newConfigName() != undefined) && (self.newConfigValue() != undefined)) {
+        configVars[self.newConfigName()] = self.newConfigValue();
       }
-      configVars[configVar.name] = value;
-    });
 
-    $.ajax("/api/heroku/config-vars/" + HerokuState.selectedApp().name + "?location=" + window.serverAppModel.location, {
-      data: JSON.stringify(configVars),
-      type: "PATCH",
-      contentType: "application/json",
-      success: function (data) {
-        HerokuState.configVarsObject(data);
-        HerokuState.newConfigName(undefined);
-        HerokuState.newConfigValue(undefined);
-      },
-      error: function (error) {
-        HerokuState.errorMessage(error.responseJSON.error);
-      }
-    });
-  };
+      self.configVars().forEach(function(configVar) {
+        var value = configVar.value;
+        if (value == "") {
+          value = null;
+        }
+        configVars[configVar.name] = value;
+      });
 
-  HerokuState.getApps();
+      $.ajax("/api/heroku/config-vars/" + self.selectedApp().name + "?location=" + window.serverAppModel.location, {
+        data: JSON.stringify(configVars),
+        type: "PATCH",
+        contentType: "application/json",
+        success: function (data) {
+          self.configVarsObject(data);
+          self.newConfigName(undefined);
+          self.newConfigValue(undefined);
+        },
+        error: function (error) {
+          self.errorMessage(error.responseJSON.error);
+        }
+      });
+    };
+
+    self.getApps();
+
+    return self;
+  }());
 
   return {
     render: function() {
