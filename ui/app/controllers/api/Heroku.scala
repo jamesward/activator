@@ -83,22 +83,40 @@ trait Heroku {
 
   // this uses the app-setup api so that the app.json configures the app on heroku
   def appSetup(location: String) = Authenticated(location).async { implicit request =>
-    // create a temporary app so we can host the app blob in it's slug storage
-    HerokuAPI.createApp(request.apiKey).flatMap { tmpApp =>
-      HerokuAPI.createSlug(request.apiKey, tmpApp.name, new File(location)).flatMap { url =>
-        val appSetupFuture = HerokuAPI.appSetup(request.apiKey, url)
+    val appJson = new File(location, "app.json")
+    if (appJson.exists()) {
+      // do a deploy with the appSetup API
+      // create a temporary app so we can host the app blob in it's slug storage
+      HerokuAPI.createApp(request.apiKey).flatMap { tmpApp =>
+        HerokuAPI.createSlug(request.apiKey, tmpApp.name, new File(location)).flatMap { url =>
+          val appSetupFuture = HerokuAPI.appSetup(request.apiKey, url)
 
-        appSetupFuture.onComplete { _ =>
-          // destroy the temporary app
-          HerokuAPI.destroyApp(request.apiKey, tmpApp.name)
-        }
+          appSetupFuture.onComplete { _ =>
+            // destroy the temporary app
+            HerokuAPI.destroyApp(request.apiKey, tmpApp.name)
+          }
 
-        appSetupFuture.map { json =>
-          val appName = (json \ "app" \ "name").as[String]
-          Created(json).addingToSession(SESSION_APP(location) -> appName)
+          appSetupFuture.map { json =>
+            val appName = (json \ "app" \ "name").as[String]
+            Created(json).addingToSession(SESSION_APP(location) -> appName)
+          }
         }
-      }
-    } recover standardError
+      } recover standardError
+    } else {
+      // create an empty app and then deploy it
+      HerokuAPI.createApp(request.apiKey).flatMap { app =>
+        HerokuAPI.createSlug(request.apiKey, app.name, new File(location)).flatMap { url =>
+          HerokuAPI.buildSlug(request.apiKey, app.name, url).map { buildJson =>
+            val json = Json.obj(
+              "app" -> Json.obj(
+                "name" -> app.name),
+              "build" -> Json.obj(
+                "output_stream_url" -> (buildJson \ "output_stream_url")))
+            Created(json).addingToSession(SESSION_APP(location) -> app.name)
+          }
+        }
+      } recover standardError
+    }
   }
 
   // todo: when build is complete, close the stream
